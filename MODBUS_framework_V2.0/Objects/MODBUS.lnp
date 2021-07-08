@@ -1,0 +1,6 @@
+"..\Objects\STARTUP.obj",
+"..\Objects\main.obj",
+"..\Objects\UART.obj",
+"..\Objects\MODBUS_Drive.obj" 
+TO "..\Objects\MODBUS" 
+PRINT("..\Listings\MODBUS.m51")

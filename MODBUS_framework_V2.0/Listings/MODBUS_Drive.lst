@@ -1,0 +1,201 @@
+C51 COMPILER V9.00   MODBUS_DRIVE                                                          05/30/2019 21:50:17 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE MODBUS_DRIVE
+OBJECT MODULE PLACED IN ..\Objects\MODBUS_Drive.obj
+COMPILER INVOKED BY: D:\Keil\C51\BIN\C51.EXE ..\c_and_h\MODBUS_Drive.c LARGE BROWSE INCDIR(..\c_and_h) DEBUG OBJECTEXTEN
+                    -D PRINT(..\Listings\MODBUS_Drive.lst) OBJECT(..\Objects\MODBUS_Drive.obj)
+
+line level    source
+
+   1          #include <all.h>
+   2          
+   3          unsigned char xdata Modbus_Read_Buffer[256] = 0;  //数据接收缓冲区
+   4          unsigned char xdata Modbus_Write_Buffer[256] = 0; //数据寄存器
+   5          unsigned char xdata Modbus_Send[256] = 0;//数据发送数组
+   6          unsigned char xdata Modbus_CRC[20]= {0};
+   7          
+   8          unsigned int Modbus_Read_Value = 0;     //接收字节计数
+   9          unsigned int Modbus_Write_Value = 0;  //发送字节计数                                
+  10          unsigned char Modbus_Read_Complete = 0; //帧接收完成标志位
+  11          unsigned int CRC_Reg = 0xffff;
+  12          unsigned char CRC_Value = 0;
+  13          unsigned int Modbus_CRC_Cecode(unsigned char *puchMsg, unsigned int usDataLen); //CRC校验
+  14          void Modbus_Init();     //帧检测定时器
+  15          void Modbus_data_Decode();
+  16          
+  17          
+  18          void Modbus_Init()//利用定时器2来计算数据帧 定时1MS   30MHz@1ms
+  19          {
+  20   1              AUXR |= 0x04;//定时器2用作定时，不分频
+  21   1              IE2 |= 0x04;//允许定时器2中断
+  22   1              T2L = 0xd0;             //设置定时初值
+  23   1              T2H = 0x8a;             //设置定时初值
+  24   1              EA = 1;  //开总中断
+  25   1              AUXR |= 0x10;
+  26   1      }
+  27          
+  28          
+  29          
+  30          //****************************************************************************
+  31          //函数名：Modbus_CRC_Cecode
+  32          //函数作用：用于CRC_16的校验计算
+  33          //输入参数1：要计算数据的序列名称
+  34          //输入参数2：要计算数据的字节长度
+  35          //输出参数：计算好的CRC值，16位数据
+  36          //****************************************************************************
+  37          unsigned int Modbus_CRC_Cecode(unsigned char *puchMsg, unsigned int usDataLen)
+  38          {
+  39   1              
+  40   1               unsigned int i,j,CRC_Reg1,Check1;
+  41   1               CRC_Reg1 = 0xFFFF;
+  42   1               for(i=0;i<usDataLen;i++)
+  43   1               {
+  44   2                      CRC_Reg1 = CRC_Reg1 ^ (unsigned int)*(puchMsg + i);
+  45   2                      for(j=0;j<8;j++)
+  46   2                      {
+  47   3                              Check1 = CRC_Reg1 & 0x0001;
+  48   3                              CRC_Reg1 >>= 1;
+  49   3                              if(Check1==0x0001)
+  50   3                              {
+  51   4                                      CRC_Reg1 ^= 0xA001;
+  52   4                              }
+  53   3                      }
+  54   2               }
+C51 COMPILER V9.00   MODBUS_DRIVE                                                          05/30/2019 21:50:17 PAGE 2   
+
+  55   1               
+  56   1               return CRC_Reg1;
+  57   1      }
+  58          
+  59          
+  60          //****************************************************************************
+  61          //函数名：Modbus_03
+  62          //函数作用：用来执行MODBUS协议中03码的功能
+  63          //输入参数：无
+  64          //输出参数：无
+  65          //备注：寄存器地址 0X00~0XFF;
+  66          //****************************************************************************
+  67          void Modbus_03(void)
+  68          {
+  69   1              unsigned int i;
+  70   1              unsigned int CRC = 0;
+  71   1              P55 = ~P55;//调试板的状态指示灯
+  72   1      
+  73   1              Modbus_Read_Value = 0;//接收数据清零，很重要，根据MODBUS指令放在需要的位置，影响很大
+  74   1      //      for(i = 0; i < 256; i++)//调试用给内部寄存器 赋值   (使用时可以注释)
+  75   1      //      {
+  76   1      //              Modbus_Write_Buffer[i] = i;     
+  77   1      //      }                       
+  78   1      
+  79   1              Modbus_Send[0] = Modbus_Read_Buffer[0];
+  80   1              Modbus_Send[1] = Modbus_Read_Buffer[1];
+  81   1              Modbus_Send[2] = (Modbus_Read_Buffer[5] * 2);
+  82   1      
+  83   1              for(i = 3; i < (Modbus_Send[2]+3); i++)  
+  84   1              {
+  85   2      
+  86   2                      Modbus_Send[i] = Modbus_Write_Buffer[(i + Modbus_Read_Buffer[3] - 3)];   
+  87   2              }
+  88   1              CRC = Modbus_CRC_Cecode(Modbus_Send,(Modbus_Send[2]+3));
+  89   1              Modbus_Send[(Modbus_Send[2] + 3)] = CRC & 0x00ff;                                                               
+  90   1              Modbus_Send[(Modbus_Send[2] + 4)] = CRC >> 8;                                             
+  91   1              UART_Byte_Value = (Modbus_Send[2] + 5);//启用发送前要设置发送字节长度，每次发送前都要设置
+  92   1              while(!UART_OFF);//发送数据前检测一下串口是否繁忙
+  93   1              UART_OFF = 0;//启用发送前要把发送结束标志位清零，每次发送前都要设置
+  94   1              SBUF = Modbus_Send[0];
+  95   1      
+  96   1               for(i = 0; i < 256; i++)//清空发送缓存区数据
+  97   1              {
+  98   2                      Modbus_Read_Buffer[i] = 0;;     
+  99   2              }
+ 100   1              Modbus_CRC[0] = 0;
+ 101   1              Modbus_CRC[1] = 0;      
+ 102   1      }
+ 103          
+ 104          void Modbus_data_Decode()
+ 105          {
+ 106   1                       
+ 107   1              if(Modbus_Read_Complete)
+ 108   1              {                
+ 109   2                       Modbus_Read_Complete = 0;
+ 110   2              
+ 111   2                       if((Modbus_CRC[1] == Modbus_Read_Buffer[Modbus_Read_Value-1]) && (Modbus_CRC[0] == Modbus_Read_Buffer[M
+             -odbus_Read_Value-2]))
+ 112   2      
+ 113   2                       {
+ 114   3                               //这里可以开始分析数据 程序进入这里就证明CRC检验已经通过了
+ 115   3                               if(Modbus_Read_Buffer[0] == (unsigned char)MODBUS_ADD)
+C51 COMPILER V9.00   MODBUS_DRIVE                                                          05/30/2019 21:50:17 PAGE 3   
+
+ 116   3                               {
+ 117   4                                      switch(Modbus_Read_Buffer[1])
+ 118   4                                       {
+ 119   5                                              case 03: Modbus_03(); break;
+ 120   5                                       }
+ 121   4                               }
+ 122   3                               else
+ 123   3                               {
+ 124   4                                        Modbus_Read_Value = 0;//接收数据清零，很重要，根据MODBUS指令放在需要的位置，影响很大
+ 125   4                               }
+ 126   3                       }
+ 127   2                       
+ 128   2               }
+ 129   1      }
+ 130          
+ 131          /* 串口接收监控，由空闲时间判定帧结束，需在定时中断中调用，ms-定时间隔 */
+ 132          void UartRxMonitor(unsigned char ms)
+ 133          {
+ 134   1          static unsigned char cntbkp = 0;
+ 135   1          static unsigned char idletmr = 0;
+ 136   1      
+ 137   1          if (Modbus_Read_Value > 0)  //接收计数器大于零时，监控总线空闲时间
+ 138   1          {
+ 139   2              if (cntbkp != Modbus_Read_Value)  //接收计数器改变，即刚接收到数据时，清零空闲计时
+ 140   2              {
+ 141   3                  cntbkp = Modbus_Read_Value;
+ 142   3                  idletmr = 0;
+ 143   3              }
+ 144   2              else                   //接收计数器未改变，即总线空闲时，累积空闲时间
+ 145   2              {
+ 146   3                  if (idletmr < 3)  //空闲计时小于3ms时，持续累加
+ 147   3                  {
+ 148   4                      idletmr += ms;
+ 149   4                      if (idletmr >= 3)  //空闲时间达到3ms时，即判定为一帧接收完毕
+ 150   4                      {
+ 151   5                                              Modbus_Read_Complete = 1;  //设置帧接收完成标志
+ 152   5                                              CRC_Reg = 0xffff;
+ 153   5                      }
+ 154   4                  }
+ 155   3              }
+ 156   2          }
+ 157   1          else
+ 158   1          {
+ 159   2              cntbkp = 0;
+ 160   2          }
+ 161   1      }
+ 162          
+ 163          
+ 164          
+ 165          void Timer2_Routine() interrupt 12
+ 166          {
+ 167   1              UartRxMonitor(1);
+ 168   1              
+ 169   1      }
+ 170          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    638    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =    798      11
+   PDATA SIZE       =   ----    ----
+C51 COMPILER V9.00   MODBUS_DRIVE                                                          05/30/2019 21:50:17 PAGE 4   
+
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
